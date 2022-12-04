@@ -1,4 +1,4 @@
-FROM nginx:stable as builder
+FROM nginx:mainline-alpine as builder
 
 ARG ENABLED_MODULES
 
@@ -11,22 +11,14 @@ RUN set -ex \
 COPY ./ /modules/
 
 RUN set -ex \
-    && apt update \
-    && apt install -y --no-install-suggests --no-install-recommends \
-                patch make wget mercurial devscripts debhelper dpkg-dev \
-                quilt lsb-release build-essential libxml2-utils xsltproc \
-                equivs git g++ libparse-recdescent-perl \
-    && XSLSCRIPT_SHA512="f7194c5198daeab9b3b0c3aebf006922c7df1d345d454bd8474489ff2eb6b4bf8e2ffe442489a45d1aab80da6ecebe0097759a1e12cc26b5f0613d05b7c09ffa *stdin" \
-    && wget -O /tmp/xslscript.pl https://hg.nginx.org/xslscript/raw-file/01dc9ba12e1b/xslscript.pl \
-    && if [ "$(cat /tmp/xslscript.pl | openssl sha512 -r)" = "$XSLSCRIPT_SHA512" ]; then \
-        echo "XSLScript checksum verification succeeded!"; \
-        chmod +x /tmp/xslscript.pl; \
-        mv /tmp/xslscript.pl /usr/local/bin/; \
-    else \
-        echo "XSLScript checksum verification failed!"; \
-        exit 1; \
-    fi \
-    && hg clone -r ${NGINX_VERSION}-${PKG_RELEASE%%~*} https://hg.nginx.org/pkg-oss/ \
+    && apk update \
+    && apk add linux-headers openssl-dev pcre2-dev zlib-dev openssl abuild \
+               musl-dev libxslt libxml2-utils make mercurial gcc unzip git \
+               xz g++ coreutils \
+    # allow abuild as a root user \
+    && printf "#!/bin/sh\\nSETFATTR=true /usr/bin/abuild -F \"\$@\"\\n" > /usr/local/bin/abuild \
+    && chmod +x /usr/local/bin/abuild \
+    && hg clone -r ${NGINX_VERSION}-${PKG_RELEASE} https://hg.nginx.org/pkg-oss/ \
     && cd pkg-oss \
     && mkdir /tmp/packages \
     && for module in $ENABLED_MODULES; do \
@@ -41,7 +33,7 @@ RUN set -ex \
             # some modules require build dependencies
             if [ -f /modules/$module/build-deps ]; then \
                 echo "Installing $module build dependencies"; \
-                apt update && apt install -y --no-install-suggests --no-install-recommends $(cat /modules/$module/build-deps | xargs); \
+                apk update && apk add $(cat /modules/$module/build-deps | xargs); \
             fi; \
             # if a module has a build dependency that is not in a distro, provide a
             # shell script to fetch/build/install those
@@ -53,13 +45,13 @@ RUN set -ex \
             fi; \
             /pkg-oss/build_module.sh -v $NGINX_VERSION -f -y -o /tmp/packages -n $module $(cat /modules/$module/source); \
             BUILT_MODULES="$BUILT_MODULES $(echo $module | tr '[A-Z]' '[a-z]' | tr -d '[/_\-\.\t ]')"; \
-        elif make -C /pkg-oss/debian list | grep -P "^$module\s+\d" > /dev/null; then \
+        elif make -C /pkg-oss/alpine list | grep -E "^$module\s+\d+" > /dev/null; then \
             echo "Building $module from pkg-oss sources"; \
-            cd /pkg-oss/debian; \
-            make rules-module-$module BASE_VERSION=$NGINX_VERSION NGINX_VERSION=$NGINX_VERSION; \
-            mk-build-deps --install --tool="apt-get -o Debug::pkgProblemResolver=yes --no-install-recommends --yes" debuild-module-$module/nginx-$NGINX_VERSION/debian/control; \
+            cd /pkg-oss/alpine; \
+            make abuild-module-$module BASE_VERSION=$NGINX_VERSION NGINX_VERSION=$NGINX_VERSION; \
+            apk add $(. ./abuild-module-$module/APKBUILD; echo $makedepends;); \
             make module-$module BASE_VERSION=$NGINX_VERSION NGINX_VERSION=$NGINX_VERSION; \
-            find ../../ -maxdepth 1 -mindepth 1 -type f -name "*.deb" -exec mv -v {} /tmp/packages/ \;; \
+            find ~/packages -type f -name "*.apk" -exec mv -v {} /tmp/packages/ \;; \
             BUILT_MODULES="$BUILT_MODULES $module"; \
         else \
             echo "Don't know how to build $module module, exiting"; \
@@ -68,13 +60,11 @@ RUN set -ex \
     done \
     && echo "BUILT_MODULES=\"$BUILT_MODULES\"" > /tmp/packages/modules.env
 
-FROM nginx:stable
+FROM nginx:mainline-alpine
 COPY --from=builder /tmp/packages /tmp/packages
 RUN set -ex \
-    && apt update \
     && . /tmp/packages/modules.env \
     && for module in $BUILT_MODULES; do \
-           apt install --no-install-suggests --no-install-recommends -y /tmp/packages/nginx-module-${module}_${NGINX_VERSION}*.deb; \
+           apk add --no-cache --allow-untrusted /tmp/packages/nginx-module-${module}-${NGINX_VERSION}*.apk; \
        done \
-    && rm -rf /tmp/packages \
-    && rm -rf /var/lib/apt/lists/
+    && rm -rf /tmp/packages
