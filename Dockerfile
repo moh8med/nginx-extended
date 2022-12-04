@@ -68,7 +68,7 @@ RUN set -ex \
     done \
     && echo "BUILT_MODULES=\"$BUILT_MODULES\"" > /tmp/packages/modules.env
 
-FROM openresty:latest
+FROM openresty/openresty-1.21.4.1-bullseye
 COPY --from=builder /tmp/packages /tmp/packages
 RUN set -ex \
     && apt update \
