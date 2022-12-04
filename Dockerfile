@@ -1,4 +1,4 @@
-FROM nginx:mainline as builder
+FROM nginx:1.21.4 as builder
 
 ARG ENABLED_MODULES
 
@@ -68,7 +68,7 @@ RUN set -ex \
     done \
     && echo "BUILT_MODULES=\"$BUILT_MODULES\"" > /tmp/packages/modules.env
 
-FROM nginx:mainline
+FROM openresty:latest
 COPY --from=builder /tmp/packages /tmp/packages
 RUN set -ex \
     && apt update \
