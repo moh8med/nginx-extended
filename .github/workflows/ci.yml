@@ -40,7 +40,7 @@ jobs:
           # platforms: linux/amd64,linux/arm64
           platforms: linux/amd64
           build-args: |
-            ENABLED_MODULES=ndk lua headers-more set-misc subs-filter modsecurity
+            ENABLED_MODULES=vts cache-purge ndk lua headers-more set-misc subs-filter modsecurity
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
